@@ -1,0 +1,20 @@
+{
+  "easy": {
+    "avg_reward": 5.470000000000001,
+    "avg_success_rate": 0.9100000000000001,
+    "avg_steps": 7.3,
+    "num_episodes": 20
+  },
+  "medium": {
+    "avg_reward": 6.375,
+    "avg_success_rate": 0.9100000000000001,
+    "avg_steps": 6.75,
+    "num_episodes": 20
+  },
+  "hard": {
+    "avg_reward": 2.8750000000000013,
+    "avg_success_rate": 0.8800000000000002,
+    "avg_steps": 8.25,
+    "num_episodes": 20
+  }
+}

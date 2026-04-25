@@ -3,15 +3,15 @@
 ILYUSHIN — PPO ADVERSARIAL TRAINING
 Responder (PPO / Llama-3.2-3B) vs Breaker (Llama 70B)
 
-Memory fixes applied:
-1. 4-bit QLoRA — model weights ~2GB instead of ~6GB
-2. LoRA adapters — only ~10M params trained instead of 3B
-3. No reference model (KL disabled) — saves full second model copy
-4. Gradient checkpointing — saves activation memory
-5. Generated-only response tensors — only new tokens passed to PPO step
-6. MAX_STEPS=10 so batch_size=10 (manageable sequence lengths)
-7. Padding short episodes to exactly batch_size so PPO never errors
-8. torch.cuda.empty_cache() + gc.collect() after every update
+Key fixes:
+1. Short prompt in dataset.py — model no longer sees truncated infrastructure
+   text and tries to continue it. Prompt ends with a JSON example.
+2. Plain text tokenization — no apply_chat_template which added suffixes
+   that broke the JSON continuation pattern.
+3. Direct model.generate() — bypasses ppo_trainer.generate() which stripped
+   kwargs causing empty outputs.
+4. parse_action handles both complete JSON and continuation output.
+5. Directories auto-created, debug output for first 3 episodes per phase.
 """
 
 import os
@@ -34,14 +34,14 @@ from transformers import AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, TaskType
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead
 
-from dataset import SYSTEM_PROMPT, format_prompt, build_conversation
+from dataset import SYSTEM_PROMPT, format_prompt
 from curriculum import CurriculumManager
 
 # ============================================================================
 # CONFIG
 # ============================================================================
 
-WORK_DIR        = Path("./training")
+WORK_DIR        = Path(".")
 CHECKPOINTS_DIR = WORK_DIR / "checkpoints"
 LOGS_DIR        = WORK_DIR / "logs"
 PLOTS_DIR       = WORK_DIR / "plots"
@@ -52,9 +52,8 @@ for d in [CHECKPOINTS_DIR, LOGS_DIR, PLOTS_DIR]:
 ENV_URL    = os.getenv("BASE_URL", "http://localhost:8000")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.2-3B-Instruct")
 
-# Episode length = PPO batch size — must match exactly
 MAX_STEPS       = 10
-MINI_BATCH_SIZE = 10   # must equal MAX_STEPS
+MINI_BATCH_SIZE = 10
 
 PPO_EPOCHS         = 2
 GRAD_ACCUM_STEPS   = 1
@@ -62,7 +61,8 @@ EPISODES_PER_PHASE = 60
 EVAL_EPISODES      = 10
 BASELINE_EPISODES  = 20
 MAX_NEW_TOKENS     = 32
-MAX_PROMPT_LENGTH  = 384
+MIN_NEW_TOKENS     = 4
+MAX_PROMPT_LENGTH  = 512   # longer now that prompts are short
 
 VALID_ACTIONS  = ["read_logs", "check_metrics", "restart_service",
                   "scale_up", "rollback", "page_oncall", "resolve"]
@@ -143,7 +143,7 @@ class AdversarialLogger:
             json.dump(self.breaker_log, f, indent=2)
         with open(self.logs_dir / "action_dist.json", "w") as f:
             json.dump({k: dict(v) for k, v in self.action_dist_log.items()}, f, indent=2)
-        print(f"[LOGS] Flushed to {self.logs_dir}/")
+        print(f"[LOGS] Flushed to {self.logs_dir.resolve()}/")
 
 # ============================================================================
 # MEMORY UTILS
@@ -164,28 +164,89 @@ def print_gpu_memory(label=""):
 # ACTION PARSING
 # ============================================================================
 
-def parse_action(text: str) -> dict:
+def parse_action(text: str, debug: bool = False) -> dict:
+    """
+    Parse model output into a valid action dict.
+    Two-stage parsing:
+    1. Try JSON parsing (ideal case)
+    2. Fall back to extracting action/service from English text
+       (model understands the task but outputs prose instead of JSON)
+    """
+    original_text = text
+
     try:
-        if "```" in text:
-            text = "\n".join(
-                l for l in text.split("\n")
-                if not l.strip().startswith("```")
-            ).strip()
+        text = text.strip()
+
+        # Try to find a complete JSON object first
         start = text.find("{")
-        end   = text.rfind("}") + 1
+        end   = text.find("}", start) + 1 if start != -1 else -1
+
         if start != -1 and end > start:
-            text = text[start:end]
-        action = json.loads(text)
+            candidate = text[start:end]
+            action = json.loads(candidate)
+        else:
+            # Try treating as continuation after {"type": "
+            candidate = '{"type": "' + text
+            start2 = candidate.find("{")
+            end2   = candidate.find("}", start2) + 1
+            if end2 > start2:
+                candidate = candidate[start2:end2]
+            action = json.loads(candidate)
+
         if action.get("type") not in VALID_ACTIONS:
+            if debug:
+                print(f"[DEBUG] Invalid type: {action.get('type')!r}")
             action["type"] = "read_logs"
+
         target = action.get("target_service")
         if target and target not in VALID_SERVICES:
             action["target_service"] = None
         if "target_service" not in action:
             action["target_service"] = None
+
+        if debug:
+            print(f"[DEBUG] Raw    : {repr(original_text[:120])}")
+            print(f"[DEBUG] Parsed : {action}")
+
         return action
-    except Exception:
-        return {"type": "read_logs", "target_service": None}
+
+    except Exception as e:
+        if debug:
+            print(f"[DEBUG] Raw    : {repr(original_text[:120])}")
+            print(f"[DEBUG] FAILED : {e} — trying English extraction")
+
+        # Stage 2: extract action and service from English text
+        # Model knows the right answer but outputs prose instead of JSON
+        text_lower = original_text.lower()
+
+        # Determine action type from keywords
+        action_type = "read_logs"  # default
+        if "restart" in text_lower:
+            action_type = "restart_service"
+        elif "scale up" in text_lower or "scale_up" in text_lower:
+            action_type = "scale_up"
+        elif "rollback" in text_lower:
+            action_type = "rollback"
+        elif "check metric" in text_lower or "check_metric" in text_lower:
+            action_type = "check_metrics"
+        elif "resolve" in text_lower:
+            action_type = "resolve"
+        elif "page" in text_lower and "oncall" in text_lower:
+            action_type = "page_oncall"
+        elif "read log" in text_lower or "read_log" in text_lower:
+            action_type = "read_logs"
+
+        # Determine target service from keywords
+        target = None
+        for svc in VALID_SERVICES:
+            if svc in text_lower or svc.replace("_", " ") in text_lower:
+                target = svc
+                break
+
+        if debug:
+            print(f"[DEBUG] English extraction: type={action_type} target={target}")
+
+        return {"type": action_type, "target_service": target}
 
 # ============================================================================
 # ENVIRONMENT HELPERS
@@ -198,8 +259,7 @@ def env_reset(env_url: str, session_id: str, task_id: str) -> dict:
         timeout=15,
     )
     res.raise_for_status()
-    data = res.json()
-    return data.get("state", data)
+    return res.json().get("state", res.json())
 
 
 def env_step(env_url: str, session_id: str, action: dict) -> tuple:
@@ -214,11 +274,9 @@ def env_step(env_url: str, session_id: str, action: dict) -> tuple:
     reward = data.get("reward", -0.1)
     if isinstance(reward, dict):
         reward = reward.get("value", -0.1)
-    reward             = float(reward)
     done               = bool(data.get("done", state.get("done", False)))
-    breaker_status     = data.get("breaker_status", {})
-    breaker_difficulty = int(breaker_status.get("difficulty_level", 1))
-    return state, reward, done, breaker_difficulty
+    breaker_difficulty = int(data.get("breaker_status", {}).get("difficulty_level", 1))
+    return state, float(reward), done, breaker_difficulty
 
 
 def env_feedback(env_url: str, session_id: str, performance: dict):
@@ -228,6 +286,8 @@ def env_feedback(env_url: str, session_id: str, performance: dict):
             json={"session_id": session_id, **performance},
             timeout=10,
         )
+        if res.status_code == 404:
+            return {}
         res.raise_for_status()
         return res.json().get("breaker_status", {})
     except Exception as e:
@@ -235,7 +295,7 @@ def env_feedback(env_url: str, session_id: str, performance: dict):
         return {}
 
 # ============================================================================
-# MODEL LOADING — QLoRA
+# MODEL LOADING
 # ============================================================================
 
 def load_model_and_tokenizer(model_name: str):
@@ -279,19 +339,17 @@ def load_model_and_tokenizer(model_name: str):
     return model, tokenizer
 
 # ============================================================================
-# TOKENIZATION
+# TOKENIZATION — plain text, no apply_chat_template
 # ============================================================================
 
 def tokenize_prompt(tokenizer, state: dict) -> torch.Tensor:
-    conversation = build_conversation(state)
-    if hasattr(tokenizer, "apply_chat_template"):
-        text = tokenizer.apply_chat_template(
-            conversation,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-    else:
-        text = f"{SYSTEM_PROMPT}\n\n{format_prompt(state)}"
+    """
+    Plain text tokenization — do NOT use apply_chat_template.
+    apply_chat_template adds its own suffixes/endings that confuse the model
+    and cause it to continue the prompt rather than output JSON.
+    Plain text lets us control exactly what the model sees.
+    """
+    text = f"{SYSTEM_PROMPT}\n\n{format_prompt(state)}"
     encoding = tokenizer(
         text,
         return_tensors="pt",
@@ -299,6 +357,33 @@ def tokenize_prompt(tokenizer, state: dict) -> torch.Tensor:
         max_length=MAX_PROMPT_LENGTH,
     )
     return encoding["input_ids"].squeeze(0)
+
+# ============================================================================
+# DIRECT GENERATION
+# ============================================================================
+
+def generate_action(model, tokenizer, query_tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Generate directly from model — bypasses ppo_trainer.generate() which
+    was stripping kwargs and causing empty outputs in TRL 0.9.6.
+    """
+    device    = next(model.parameters()).device
+    input_ids = query_tensor.unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        output = model.generate(
+            input_ids,
+            max_new_tokens=MAX_NEW_TOKENS,
+            min_new_tokens=MIN_NEW_TOKENS,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.9,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=None,
+            repetition_penalty=1.1,
+        )
+
+    return output[0][query_tensor.shape[0]:]
 
 # ============================================================================
 # BASELINE
@@ -352,12 +437,8 @@ def collect_ppo_episode(
     tokenizer,
     task_id:     str,
     episode:     int,
+    debug:       bool = False,
 ) -> dict:
-    """
-    Run one episode and collect PPO training data.
-    responses contains ONLY generated tokens (not prompt+response).
-    Episodes shorter than MAX_STEPS are padded to MINI_BATCH_SIZE.
-    """
     session_id = f"ppo_{task_id}_{episode}_{int(time.time())}"
 
     queries   = []
@@ -384,39 +465,22 @@ def collect_ppo_episode(
         }
 
     while not done and step_count < MAX_STEPS:
-        # Tokenize prompt
+
         try:
             query_tensor = tokenize_prompt(tokenizer, state)
         except Exception as e:
             print(f"[ROLLOUT] Tokenize error at step {step_count}: {e}")
             break
 
-        # Generate action
         try:
-            response_tensors = ppo_trainer.generate(
-                [query_tensor],
-                max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-            full_tensor   = response_tensors[0]
-            # Strip the prompt — keep only what the model generated
-            generated_ids = full_tensor[query_tensor.shape[0]:]
-            
-            # Guard against empty generation
-            if generated_ids.shape[0] == 0:
-                generated_ids = torch.tensor([tokenizer.eos_token_id], dtype=torch.long)
-            
-            action_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+            generated_ids = generate_action(ppo_trainer.model, tokenizer, query_tensor)
+            action_text   = tokenizer.decode(generated_ids, skip_special_tokens=True)
         except Exception as e:
             print(f"[ROLLOUT] Generate error at step {step_count}: {e}")
             break
 
-        # Parse action
-        action = parse_action(action_text)
+        action = parse_action(action_text, debug=debug)
+
         if action["type"] in ("restart_service", "scale_up", "rollback", "resolve") \
                 and not action.get("target_service"):
             infra = state.get("infrastructure", {})
@@ -427,7 +491,6 @@ def collect_ppo_episode(
             if not action.get("target_service"):
                 action["target_service"] = VALID_SERVICES[0]
 
-        # Step environment
         try:
             state, reward, done, breaker_difficulty = env_step(
                 env_url, session_id, action
@@ -437,26 +500,26 @@ def collect_ppo_episode(
             reward = -0.5
             done   = True
 
-        # Penalize read_logs spam — only allowed once per episode
+        # Penalise read_logs spam
         read_logs_count = actions_taken.count("read_logs")
-        if action["type"] == "read_logs" and read_logs_count > 1:
+        if action["type"] == "read_logs" and read_logs_count >= 1:
             reward -= 0.5
+            if debug:
+                print(f"[DEBUG] read_logs spam penalty (count={read_logs_count + 1})")
 
-        # 5. Store experience — generated tokens only, not full sequence
         queries.append(query_tensor)
         responses.append(generated_ids)
         rewards.append(torch.tensor(reward, dtype=torch.float32))
 
-        actions_taken.append(action.get("type", "unknown"))
+        actions_taken.append(action["type"])
         total_reward += reward
         step_count   += 1
 
-        if action.get("type") == "page_oncall":
+        if action["type"] == "page_oncall":
             oncall_paged = True
 
     healthy_services = state.get("healthy_services", 0)
     total_services   = state.get("total_services", 5)
-    success_rate     = healthy_services / max(total_services, 1)
 
     return {
         "queries":            queries,
@@ -464,7 +527,7 @@ def collect_ppo_episode(
         "rewards":            rewards,
         "total_reward":       round(total_reward, 4),
         "steps":              step_count,
-        "success_rate":       success_rate,
+        "success_rate":       healthy_services / max(total_services, 1),
         "healthy_services":   healthy_services,
         "breaker_difficulty": breaker_difficulty,
         "actions_taken":      actions_taken,
@@ -493,57 +556,47 @@ def run_eval_episode(env_url, model, tokenizer, task_id, episode) -> dict:
     actions_taken      = []
     oncall_paged       = False
 
-    with torch.no_grad():
-        while not done and step_count < MAX_STEPS:
-            try:
-                query_tensor = tokenize_prompt(tokenizer, state)
-                input_ids    = query_tensor.unsqueeze(0).to(next(model.parameters()).device)
-                output = model.generate(
-                    input_ids,
-                    max_new_tokens=MAX_NEW_TOKENS,
-                    do_sample=False,
-                    pad_token_id=tokenizer.pad_token_id,
-                    eos_token_id=tokenizer.eos_token_id,
-                )
-                generated_ids = output[0][input_ids.shape[1]:]
-                action_text   = tokenizer.decode(generated_ids, skip_special_tokens=True)
-            except Exception as e:
-                print(f"[EVAL] Generate error: {e}")
-                break
+    while not done and step_count < MAX_STEPS:
+        try:
+            query_tensor  = tokenize_prompt(tokenizer, state)
+            generated_ids = generate_action(model, tokenizer, query_tensor)
+            action_text   = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        except Exception as e:
+            print(f"[EVAL] Generate error: {e}")
+            break
 
-            action = parse_action(action_text)
-            if action["type"] in ("restart_service", "scale_up", "rollback", "resolve") \
-                    and not action.get("target_service"):
-                infra = state.get("infrastructure", {})
-                for svc, data in infra.items():
-                    if data.get("status") != "healthy":
-                        action["target_service"] = svc
-                        break
-                if not action.get("target_service"):
-                    action["target_service"] = VALID_SERVICES[0]
+        action = parse_action(action_text, debug=False)
+        if action["type"] in ("restart_service", "scale_up", "rollback", "resolve") \
+                and not action.get("target_service"):
+            infra = state.get("infrastructure", {})
+            for svc, data in infra.items():
+                if data.get("status") != "healthy":
+                    action["target_service"] = svc
+                    break
+            if not action.get("target_service"):
+                action["target_service"] = VALID_SERVICES[0]
 
-            try:
-                state, reward, done, breaker_difficulty = env_step(
-                    env_url, session_id, action
-                )
-            except Exception as e:
-                print(f"[EVAL] Step error: {e}")
-                break
+        try:
+            state, reward, done, breaker_difficulty = env_step(
+                env_url, session_id, action
+            )
+        except Exception as e:
+            print(f"[EVAL] Step error: {e}")
+            break
 
-            total_reward += reward
-            step_count   += 1
-            actions_taken.append(action.get("type", "unknown"))
-            if action.get("type") == "page_oncall":
-                oncall_paged = True
+        total_reward += reward
+        step_count   += 1
+        actions_taken.append(action["type"])
+        if action["type"] == "page_oncall":
+            oncall_paged = True
 
     healthy_services = state.get("healthy_services", 0)
     total_services   = state.get("total_services", 5)
-    success_rate     = healthy_services / max(total_services, 1)
 
     return {
         "reward":             round(total_reward, 4),
         "steps":              step_count,
-        "success":            success_rate,
+        "success":            healthy_services / max(total_services, 1),
         "healthy_services":   healthy_services,
         "breaker_difficulty": breaker_difficulty,
         "actions_taken":      actions_taken,
@@ -559,6 +612,9 @@ def main():
     print("  ILYUSHIN — PPO ADVERSARIAL TRAINING")
     print("  Responder (QLoRA+PPO / Llama-3.2-3B) vs Breaker (Llama 70B)")
     print("=" * 80)
+    print(f"[TRAIN] Checkpoints → {CHECKPOINTS_DIR.resolve()}")
+    print(f"[TRAIN] Logs        → {LOGS_DIR.resolve()}")
+    print(f"[TRAIN] Plots       → {PLOTS_DIR.resolve()}")
 
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -594,7 +650,6 @@ def main():
     logger     = AdversarialLogger(LOGS_DIR)
     curriculum = CurriculumManager()
 
-    # Baselines
     print("\n[BASELINE] Running random agent baselines...")
     for task_id in ["easy", "medium", "hard"]:
         avg_r, avg_s, avg_st = run_baseline(ENV_URL, task_id, n_episodes=BASELINE_EPISODES)
@@ -618,12 +673,15 @@ def main():
             print(f"\n[ROLLOUT] Phase={phase} Episode={ep+1}/{EPISODES_PER_PHASE} "
                   f"Global={global_episode}")
 
+            debug_this_episode = (ep < 3)
+
             episode_data = collect_ppo_episode(
                 env_url=ENV_URL,
                 ppo_trainer=ppo_trainer,
                 tokenizer=tokenizer,
                 task_id=phase,
                 episode=global_episode,
+                debug=debug_this_episode,
             )
 
             queries   = episode_data["queries"]
@@ -637,8 +695,6 @@ def main():
                 free_memory()
                 continue
 
-            # Pad to exactly MINI_BATCH_SIZE if episode ended early
-            # PPOTrainer requires exactly batch_size examples
             while len(queries) < MINI_BATCH_SIZE:
                 queries.append(queries[-1].clone())
                 responses.append(responses[-1].clone())
@@ -648,14 +704,13 @@ def main():
             responses = responses[:MINI_BATCH_SIZE]
             rewards   = rewards[:MINI_BATCH_SIZE]
 
-            # PPO update
             try:
                 stats = ppo_trainer.step(queries, responses, rewards)
                 mean_reward = float(np.mean([r.item() for r in rewards[:n_steps]]))
                 print(f"[PPO] steps={n_steps} "
                       f"mean_reward={mean_reward:.3f} "
                       f"success={episode_data['success_rate']:.2%} "
-                      f"breaker_level={episode_data['breaker_difficulty']}")
+                      f"actions={episode_data['actions_taken']}")
                 if "ppo/loss/policy" in stats:
                     print(f"[PPO] policy_loss={stats.get('ppo/loss/policy', 0):.4f} "
                           f"value_loss={stats.get('ppo/loss/value', 0):.4f}")
@@ -705,9 +760,12 @@ def main():
 
             if (ep + 1) % 10 == 0:
                 try:
-                    breaker_res = requests.get(f"{ENV_URL}/env/breaker/status/{episode_data['session_id']}", timeout=5)
+                    breaker_res = requests.get(
+                        f"{ENV_URL}/env/breaker/status/{episode_data['session_id']}",
+                        timeout=5
+                    )
                     if breaker_res.ok:
-                        bs = breaker_res.json()
+                        bs = breaker_res.json().get("breaker_status", breaker_res.json())
                         logger.log_breaker_status(
                             phase=phase,
                             difficulty_level=bs.get("difficulty_level", 1),
@@ -718,18 +776,14 @@ def main():
                 except Exception:
                     pass
 
-        # Save checkpoint
         ckpt_path = CHECKPOINTS_DIR / f"checkpoint_{phase}"
+        ckpt_path.mkdir(parents=True, exist_ok=True)
         ppo_trainer.model.save_pretrained(str(ckpt_path))
         tokenizer.save_pretrained(str(ckpt_path))
-        print(f"[TRAIN] Checkpoint saved: {ckpt_path}")
+        print(f"[TRAIN] Checkpoint saved: {ckpt_path.resolve()}")
 
-        # Evaluation
         print(f"\n[EVAL] Evaluating {phase} phase ({EVAL_EPISODES} episodes)...")
-        eval_rewards              = []
-        eval_successes            = []
-        eval_steps_list           = []
-        eval_breaker_difficulties = []
+        eval_rewards, eval_successes, eval_steps_list, eval_breaker_difficulties = [], [], [], []
 
         for ev in range(EVAL_EPISODES):
             result = run_eval_episode(ENV_URL, ppo_trainer.model, tokenizer, phase, ev)
@@ -763,11 +817,11 @@ def main():
               f"breaker_level={avg_breaker_diff:.1f}")
         print_gpu_memory(f"end of {phase} phase")
 
-    # Save final model
     final_path = CHECKPOINTS_DIR / "final_model"
+    final_path.mkdir(parents=True, exist_ok=True)
     ppo_trainer.model.save_pretrained(str(final_path))
     tokenizer.save_pretrained(str(final_path))
-    print(f"\n[TRAIN] Final model saved to {final_path}")
+    print(f"\n[TRAIN] Final model saved to {final_path.resolve()}")
 
     logger.flush()
     generate_plots(logger, phase_episodes, PLOTS_DIR)
@@ -775,9 +829,9 @@ def main():
     print(f"\n{'=' * 80}")
     print("  ADVERSARIAL TRAINING COMPLETE!")
     print(f"{'=' * 80}")
-    print(f"  Logs:        {LOGS_DIR}")
-    print(f"  Plots:       {PLOTS_DIR}")
-    print(f"  Checkpoints: {CHECKPOINTS_DIR}")
+    print(f"  Logs:        {LOGS_DIR.resolve()}")
+    print(f"  Plots:       {PLOTS_DIR.resolve()}")
+    print(f"  Checkpoints: {CHECKPOINTS_DIR.resolve()}")
 
 # ============================================================================
 # PLOTTING
@@ -958,7 +1012,7 @@ def generate_plots(logger: AdversarialLogger, phase_episodes: dict, plots_dir: P
         plt.close()
         print("[PLOTS] Saved 06_steps_to_resolution.png")
 
-    print(f"[PLOTS] All plots saved to {plots_dir}/")
+    print(f"[PLOTS] All plots saved to {plots_dir.resolve()}/")
 
 
 if __name__ == "__main__":

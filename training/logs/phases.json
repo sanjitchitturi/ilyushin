@@ -1,0 +1,32 @@
+[
+  {
+    "phase": "easy",
+    "start_episode": 0,
+    "end_episode": 60,
+    "avg_reward": 14.470000000000002,
+    "avg_success_rate": 0.9800000000000001,
+    "avg_steps": 3.3,
+    "breaker_difficulty": 1,
+    "timestamp": "2026-04-25T10:13:03.174173"
+  },
+  {
+    "phase": "medium",
+    "start_episode": 60,
+    "end_episode": 120,
+    "avg_reward": 15.419999999999998,
+    "avg_success_rate": 1.0,
+    "avg_steps": 5.8,
+    "breaker_difficulty": 1,
+    "timestamp": "2026-04-25T10:33:41.135438"
+  },
+  {
+    "phase": "hard",
+    "start_episode": 120,
+    "end_episode": 180,
+    "avg_reward": 15.59,
+    "avg_success_rate": 1.0,
+    "avg_steps": 3.1,
+    "breaker_difficulty": 1,
+    "timestamp": "2026-04-25T10:48:31.141986"
+  }
+]

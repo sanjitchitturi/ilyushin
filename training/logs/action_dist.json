@@ -1,0 +1,26 @@
+{
+  "easy": {
+    "restart_service": 59,
+    "read_logs": 22,
+    "scale_up": 5,
+    "check_metrics": 2,
+    "page_oncall": 1
+  },
+  "medium": {
+    "restart_service": 32,
+    "read_logs": 171,
+    "scale_up": 21,
+    "check_metrics": 28,
+    "page_oncall": 12,
+    "resolve": 6
+  },
+  "hard": {
+    "restart_service": 21,
+    "scale_up": 48,
+    "read_logs": 79,
+    "resolve": 4,
+    "check_metrics": 16,
+    "page_oncall": 10,
+    "rollback": 2
+  }
+}
