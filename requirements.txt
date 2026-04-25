@@ -1,13 +1,3 @@
-# requirements.txt
-# Generated from the provided `pip list`.
-# Notes:
-# - PyTorch CUDA wheels require the extra index below.
-# - System/apt-managed packages excluded from pip install:
-#   dbus-python==1.2.18
-#   python-apt==2.4.0+ubuntu4
-#   PyGObject==3.42.1
-# - Install those in Dockerfile with apt packages if needed.
-
 --extra-index-url https://download.pytorch.org/whl/cu124
 
 accelerate==0.34.0
