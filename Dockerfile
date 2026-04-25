@@ -1,6 +1,3 @@
-# Dockerfile
-# Uses the pinned requirements.txt generated from the provided environment.
-
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
