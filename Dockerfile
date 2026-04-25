@@ -1,30 +1,33 @@
-FROM python:3.11-slim
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
-WORKDIR /app
+WORKDIR /workspace
 
-# System deps kept minimal for faster builds.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-dev \
+    python3-apt \
+    python3-dbus \
+    python3-gi \
     build-essential \
+    git \
+    curl \
+    ca-certificates \
+    libglib2.0-0 \
+    libcairo2 \
+    libgirepository-1.0-1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY . /app
+COPY requirements.txt /workspace/requirements.txt
 
-# Prefer project requirements when present; otherwise install core runtime deps.
-RUN if [ -f requirements.txt ]; then \
-        pip install --no-cache-dir -r requirements.txt; \
-    else \
-        pip install --no-cache-dir \
-            fastapi \
-            uvicorn \
-            pydantic \
-            openai \
-            requests \
-            openenv; \
-    fi
+RUN python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install -r /workspace/requirements.txt
 
-EXPOSE 8000
+EXPOSE 7860 8000 8888
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["bash"]
