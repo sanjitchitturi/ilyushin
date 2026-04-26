@@ -2,16 +2,6 @@
 """
 ILYUSHIN — PPO ADVERSARIAL TRAINING
 Responder (PPO / Llama-3.2-3B) vs Breaker (Llama 70B)
-
-Key fixes:
-1. Short prompt in dataset.py — model no longer sees truncated infrastructure
-   text and tries to continue it. Prompt ends with a JSON example.
-2. Plain text tokenization — no apply_chat_template which added suffixes
-   that broke the JSON continuation pattern.
-3. Direct model.generate() — bypasses ppo_trainer.generate() which stripped
-   kwargs causing empty outputs.
-4. parse_action handles both complete JSON and continuation output.
-5. Directories auto-created, debug output for first 3 episodes per phase.
 """
 
 import os

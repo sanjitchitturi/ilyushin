@@ -22,7 +22,7 @@ import json
 from typing import Optional
 
 from openai import OpenAI
-from openenv.core.generic_client import GenericEnvClient
+from env.client import IlyushinClient
 
 from agents.monitor import MonitorAgent
 from agents.responder import ResponderAgent
@@ -195,9 +195,10 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
     responder = ResponderAgent()
     verifier  = VerifierAgent()
 
-    with GenericEnvClient(base_url=BASE_URL).sync() as env:
+    with IlyushinClient(base_url=BASE_URL).sync() as env:
         result = env.reset(task_id=task_id)
-        state  = get_state_dict(result.observation) if hasattr(result, "observation") else get_state_dict(result)
+        obs    = result.observation if hasattr(result, "observation") else result
+        state  = get_state_dict(obs)
 
         print_sub("INITIAL INFRASTRUCTURE STATE")
         print_service_table(state.get("infrastructure", {}))
@@ -252,10 +253,10 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
 
             try:
                 result = env.step(action)
-                step_data = get_state_dict(result.observation) if hasattr(result, "observation") else get_state_dict(result)
-                reward    = result.reward if hasattr(result, "reward") and result.reward is not None else step_data.get("reward", -0.1)
-                done      = result.done if hasattr(result, "done") else step_data.get("done", False)
-                state     = step_data
+                obs    = result.observation if hasattr(result, "observation") else result
+                reward = result.reward if hasattr(result, "reward") and result.reward is not None else 0.0
+                done   = result.done if hasattr(result, "done") else False
+                state  = get_state_dict(obs)
             except Exception as exc:
                 log_step(step_count + 1, action_str, 0.00, True, str(exc))
                 break
@@ -287,10 +288,10 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
                     if svc not in resolved_services and not state.get("done", False):
                         try:
                             result = env.step({"type": "resolve", "target_service": svc})
-                            step_data = get_state_dict(result.observation) if hasattr(result, "observation") else get_state_dict(result)
-                            reward    = result.reward if hasattr(result, "reward") and result.reward is not None else step_data.get("reward", -0.1)
-                            done      = result.done if hasattr(result, "done") else step_data.get("done", False)
-                            state     = step_data
+                            obs    = result.observation if hasattr(result, "observation") else result
+                            reward = result.reward if hasattr(result, "reward") and result.reward is not None else 0.0
+                            done   = result.done if hasattr(result, "done") else False
+                            state  = get_state_dict(obs)
                             step_count   += 1
                             total_reward += reward
                             all_rewards.append(reward)
@@ -324,15 +325,15 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
         log_end(success=success, steps=step_count, score=score, rewards=all_rewards)
 
         episode_summary = {
-            "task_id":         task_id,
-            "total_steps":     step_count,
-            "total_reward":    round(total_reward, 4),
-            "final_score":     score,
+            "task_id":          task_id,
+            "total_steps":      step_count,
+            "total_reward":     round(total_reward, 4),
+            "final_score":      score,
             "healthy_services": state.get("healthy_services", 0),
-            "total_services":  state.get("total_services", 5),
-            "oncall_paged":    state.get("oncall_paged", False),
-            "done":            state.get("done", False),
-            "actions_taken":   actions_taken,
+            "total_services":   state.get("total_services", 5),
+            "oncall_paged":     state.get("oncall_paged", False),
+            "done":             state.get("done", False),
+            "actions_taken":    actions_taken,
             "reward_breakdown": reward_breakdown,
         }
         trainer.analyze_episode(episode_summary)
