@@ -26,8 +26,6 @@ from env.client import IlyushinClient
 
 from agents.monitor import MonitorAgent
 from agents.responder import ResponderAgent
-from agents.verifier import VerifierAgent
-from agents.trainer import TrainerAgent
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
@@ -83,17 +81,6 @@ def print_monitor_report(report: dict):
     print_row("Affected services",  str(report.get("affected_services", [])))
     print_row("Root cause",         report.get("root_cause_hypothesis", "?"))
     print_row("Recommended action", report.get("recommended_first_action", "?"))
-
-def print_verifier_report(report: dict):
-    print_row("Resolution confirmed", str(report.get("resolution_confirmed", "?")))
-    print_row("Still unhealthy",      str(report.get("services_still_unhealthy", [])))
-    print_row("Recommended",          report.get("recommended_action", "?"))
-    warnings = report.get("lingering_warnings", [])
-    if warnings:
-        print(f"\n  Lingering warnings:")
-        for w in warnings:
-            print(f"    {w}")
-    print_row("Notes", report.get("verification_notes", "?"))
 
 def health_bar(healthy: int, total: int) -> str:
     if total == 0:
@@ -187,13 +174,12 @@ def compute_score(state: dict) -> float:
 
 # ── episode runner ─────────────────────────────────────────────────
 
-def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
+def run_episode(task_id: str) -> tuple:
     log_start(task=task_id, model=MODEL_NAME)
     print_section(f"TASK: {task_id.upper()}")
 
     monitor   = MonitorAgent()
     responder = ResponderAgent()
-    verifier  = VerifierAgent()
 
     with IlyushinClient(base_url=BASE_URL).sync() as env:
         result = env.reset(task_id=task_id)
@@ -213,7 +199,6 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
         total_reward      = 0.0
         step_count        = 0
         actions_taken     = []
-        reward_breakdown  = []
         resolved_services = []
 
         while not state.get("done", False):
@@ -265,7 +250,6 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
             total_reward += reward
             all_rewards.append(reward)
             actions_taken.append(action.get("type", "unknown"))
-            reward_breakdown.append({"step": step_count, "action": action_str, "reward": reward})
 
             if action.get("type") == "resolve" and action.get("target_service"):
                 resolved_services.append(action["target_service"])
@@ -305,10 +289,6 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
                             pass
                         break
 
-        print_sub("VERIFIER AGENT — Final Check")
-        verification = verifier.verify(state)
-        print_verifier_report(verification)
-
         print_sub("INFRASTRUCTURE — Final State")
         print_service_table(state.get("infrastructure", {}))
 
@@ -323,20 +303,6 @@ def run_episode(task_id: str, trainer: TrainerAgent) -> tuple:
         print_row("Outcome",      "SUCCESS" if success else "INCOMPLETE")
 
         log_end(success=success, steps=step_count, score=score, rewards=all_rewards)
-
-        episode_summary = {
-            "task_id":          task_id,
-            "total_steps":      step_count,
-            "total_reward":     round(total_reward, 4),
-            "final_score":      score,
-            "healthy_services": state.get("healthy_services", 0),
-            "total_services":   state.get("total_services", 5),
-            "oncall_paged":     state.get("oncall_paged", False),
-            "done":             state.get("done", False),
-            "actions_taken":    actions_taken,
-            "reward_breakdown": reward_breakdown,
-        }
-        trainer.analyze_episode(episode_summary)
 
         return score, step_count, round(total_reward, 4)
 
@@ -357,12 +323,11 @@ def main() -> None:
     print_row("Tasks",     "easy / medium / hard")
     print_row("Max steps", "20 per episode")
 
-    trainer  = TrainerAgent()
     task_ids = ["easy", "medium", "hard"]
     results  = {}
 
     for task_id in task_ids:
-        score, steps, reward = run_episode(task_id=task_id, trainer=trainer)
+        score, steps, reward = run_episode(task_id=task_id)
         results[task_id] = {"score": score, "steps": steps, "reward": reward}
 
     print_section("FINAL RESULTS")
@@ -377,12 +342,6 @@ def main() -> None:
     avg = total_score / len(results)
     print(f"  {THIN}")
     print(f"  {'AVERAGE':<12} {avg:<10.2f}")
-
-    performance = trainer.get_responder_performance()
-    print_sub("TRAINER AGENT — Performance Summary")
-    for k, v in performance.items():
-        print_row(k, str(v))
-
     print(f"\n{LINE}\n")
 
 
