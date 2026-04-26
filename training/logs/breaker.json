@@ -5,7 +5,7 @@
     "effective_incidents": [],
     "vulnerable_services": [],
     "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:03:58.230182"
+    "timestamp": "2026-04-26T08:51:43.764235"
   },
   {
     "phase": "easy",
@@ -13,103 +13,23 @@
     "effective_incidents": [],
     "vulnerable_services": [],
     "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:05:28.287680"
+    "timestamp": "2026-04-26T08:52:34.255078"
   },
   {
-    "phase": "easy",
+    "phase": "medium",
     "difficulty_level": 2,
     "effective_incidents": [],
     "vulnerable_services": [],
     "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:06:47.720721"
+    "timestamp": "2026-04-26T08:54:17.297707"
   },
   {
-    "phase": "easy",
+    "phase": "medium",
     "difficulty_level": 2,
     "effective_incidents": [],
     "vulnerable_services": [],
     "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:08:00.053718"
-  },
-  {
-    "phase": "easy",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:09:19.579119"
-  },
-  {
-    "phase": "easy",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:11:10.332886"
-  },
-  {
-    "phase": "medium",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.96,
-    "timestamp": "2026-04-25T10:15:55.857173"
-  },
-  {
-    "phase": "medium",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.9400000000000001,
-    "timestamp": "2026-04-25T10:19:03.856024"
-  },
-  {
-    "phase": "medium",
-    "difficulty_level": 1,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.9400000000000001,
-    "timestamp": "2026-04-25T10:22:13.937733"
-  },
-  {
-    "phase": "medium",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.96,
-    "timestamp": "2026-04-25T10:25:14.198905"
-  },
-  {
-    "phase": "medium",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.9800000000000001,
-    "timestamp": "2026-04-25T10:27:46.147533"
-  },
-  {
-    "phase": "medium",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.96,
-    "timestamp": "2026-04-25T10:30:42.815420"
-  },
-  {
-    "phase": "hard",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.9800000000000001,
-    "timestamp": "2026-04-25T10:35:57.229705"
-  },
-  {
-    "phase": "hard",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 0.9800000000000001,
-    "timestamp": "2026-04-25T10:39:07.627324"
+    "timestamp": "2026-04-26T08:55:09.321987"
   },
   {
     "phase": "hard",
@@ -117,7 +37,7 @@
     "effective_incidents": [],
     "vulnerable_services": [],
     "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:41:55.630859"
+    "timestamp": "2026-04-26T08:57:08.790668"
   },
   {
     "phase": "hard",
@@ -125,22 +45,6 @@
     "effective_incidents": [],
     "vulnerable_services": [],
     "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:44:09.042445"
-  },
-  {
-    "phase": "hard",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:45:31.399106"
-  },
-  {
-    "phase": "hard",
-    "difficulty_level": 2,
-    "effective_incidents": [],
-    "vulnerable_services": [],
-    "responder_success_rate": 1.0,
-    "timestamp": "2026-04-25T10:46:47.382182"
+    "timestamp": "2026-04-26T08:58:21.218009"
   }
 ]
