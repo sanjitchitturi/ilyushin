@@ -11,7 +11,10 @@ Candidate scoring uses local reward estimation (snapshot approach):
   - Advance the real episode with the best-scoring candidate
 """
 
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import gc
 import json
 import time
