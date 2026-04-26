@@ -82,14 +82,14 @@ class IlyushinEnv(Environment):
             step_count=0
         )
 
-        return self._to_observation(self.current_state)
+        return self._to_observation(self.current_state, reward=None, done=False)
 
-    def step(self, action: IlyushinAction, **kwargs) -> tuple:
+    def step(self, action: IlyushinAction, **kwargs) -> IlyushinObservation:
         """
         Execute one step in the environment.
 
-        Returns:
-            (IlyushinObservation, reward: float, done: bool)
+        Returns IlyushinObservation with reward and done fields set,
+        as required by the OpenEnv HTTPEnvServer interface.
         """
         if self.current_state is None:
             raise RuntimeError("Call reset() before step()")
@@ -171,15 +171,17 @@ class IlyushinEnv(Environment):
             action_success=action_success,
         )
 
-        obs = self._to_observation(self.current_state)
-
-        # Return proper OpenEnv-compliant tuple: (observation, reward, done)
-        return obs, reward_value, self.current_state.done
+        # Return observation with reward and done embedded — OpenEnv standard
+        return self._to_observation(
+            self.current_state,
+            reward=reward_value,
+            done=self.current_state.done,
+        )
 
     def state(self) -> IlyushinObservation:
         if self.current_state is None:
             raise RuntimeError("Call reset() first.")
-        return self._to_observation(self.current_state)
+        return self._to_observation(self.current_state, reward=None, done=False)
 
     def get_breaker_status(self) -> dict:
         """Get Breaker agent status and learning."""
@@ -191,11 +193,12 @@ class IlyushinEnv(Environment):
             if service_name not in i.target_services
         ]
 
-    def _to_observation(self, state: EnvState) -> IlyushinObservation:
+    def _to_observation(self, state: EnvState, reward, done: bool) -> IlyushinObservation:
         return IlyushinObservation(
             task_id=state.task_id,
             step_count=state.step_count,
-            done=state.done,
+            done=done,
+            reward=reward,
             infrastructure=state.infrastructure_snapshot,
             active_incidents=state.active_incidents,
             healthy_services=state.healthy_services,
@@ -244,8 +247,7 @@ class IlyushinEnv(Environment):
             service = self.infrastructure.services.get(target_service)
             if not service:
                 return f"Service '{target_service}' not found."
-            
-            # Convert MetricSnapshot objects to plain dicts
+
             metrics_dict = {
                 name: {
                     "value":  m.value,
@@ -256,6 +258,6 @@ class IlyushinEnv(Environment):
             }
             metrics_str = json.dumps(metrics_dict, indent=2)
             return f"Metrics for {target_service}:\n{metrics_str}"
-    
+
         all_metrics = self.infrastructure.get_all_metrics()
         return json.dumps(all_metrics, indent=2)[:500]

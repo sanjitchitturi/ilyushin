@@ -30,20 +30,14 @@ class FeedbackRequest(BaseModel):
     unhealthy_services: list = []
 
 
-def observation_to_dict(obs: Observation) -> dict:
-    return {
-        "task_id":            obs.task_id,
-        "step_count":         obs.step_count,
-        "done":               obs.done,
-        "infrastructure":     obs.infrastructure,
-        "active_incidents":   obs.active_incidents,
-        "healthy_services":   obs.healthy_services,
-        "total_services":     obs.total_services,
-        "last_action":        obs.last_action,
-        "last_action_result": obs.last_action_result,
-        "last_action_success": obs.last_action_success,
-        "oncall_paged":       obs.oncall_paged,
-    }
+def observation_to_dict(obs) -> dict:
+    if isinstance(obs, dict):
+        return obs
+    if hasattr(obs, "model_dump"):
+        return obs.model_dump()
+    if hasattr(obs, "__dict__"):
+        return obs.__dict__
+    return {}
 
 
 @router.post("/reset")
@@ -82,8 +76,10 @@ def step(req: StepRequest):
 
         print(f"[STEP] Session {req.session_id}: action={action_dict}")
 
-        # Unpack the proper OpenEnv tuple: (obs, reward, done)
-        obs, reward_value, done = env.step(action_dict)
+        # step() now returns an Observation with reward and done embedded
+        obs = env.step(action_dict)
+        reward_value = obs.reward if obs.reward is not None else 0.0
+        done = obs.done
 
         return {
             "session_id":     req.session_id,
@@ -106,10 +102,7 @@ def step(req: StepRequest):
 
 @router.post("/feedback")
 def send_feedback(req: FeedbackRequest):
-    """
-    Send Responder performance feedback to Breaker.
-    Breaker learns from this and adapts difficulty.
-    """
+    """Send Responder performance feedback to Breaker."""
     env = sessions.get(req.session_id)
     if not env:
         raise HTTPException(
@@ -133,10 +126,10 @@ def send_feedback(req: FeedbackRequest):
         print(f"[BREAKER] Observed Responder success: {req.success_rate:.1%}")
 
         return {
-            "session_id":        req.session_id,
-            "breaker_status":    env.get_breaker_status(),
+            "session_id":         req.session_id,
+            "breaker_status":     env.get_breaker_status(),
             "breaker_difficulty": env.breaker_agent.current_difficulty_level,
-            "message":           "Breaker has learned and adapted",
+            "message":            "Breaker has learned and adapted",
         }
     except Exception as e:
         print(f"[FEEDBACK] Error: {e}")

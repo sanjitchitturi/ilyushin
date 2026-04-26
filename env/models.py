@@ -1,11 +1,17 @@
 from typing import Optional
 from pydantic import Field
-from openenv.core.env_server import Action, Observation
+from openenv.core.env_server import Action, Observation, State
 
 
 class IlyushinAction(Action):
-    type: str = Field(..., description="Action type: read_logs, check_metrics, restart_service, scale_up, rollback, page_oncall, resolve")
-    target_service: Optional[str] = Field(default=None, description="Target service name")
+    type: str = Field(
+        ...,
+        description="Action type: read_logs, check_metrics, restart_service, scale_up, rollback, page_oncall, resolve"
+    )
+    target_service: Optional[str] = Field(
+        default=None,
+        description="Target service name"
+    )
 
 
 class IlyushinObservation(Observation):
@@ -20,6 +26,15 @@ class IlyushinObservation(Observation):
     last_action_result: str = Field(default="", description="Result of last action")
     last_action_success: bool = Field(default=True, description="Whether last action succeeded")
     oncall_paged: bool = Field(default=False, description="Whether on-call engineer was paged")
+
+
+class IlyushinState(State):
+    task_id: str = Field(default="", description="Current task ID")
+    healthy_services: int = Field(default=0, description="Number of healthy services")
+    total_services: int = Field(default=5, description="Total number of services")
+    oncall_paged: bool = Field(default=False, description="Whether on-call engineer was paged")
+    last_action: str = Field(default="none", description="Last action taken")
+    last_action_result: str = Field(default="", description="Result of last action")
 
 
 class Reward:
