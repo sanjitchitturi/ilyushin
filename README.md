@@ -1,21 +1,21 @@
-# Ilyushin - Adversarial Incident Response Environment
+# Ilyushin: Multi-Agent Adversarial Incident Escalation for Autonomous Recovery
 
-An OpenEnv-compatible reinforcement learning environment where AI agents learn to resolve production infrastructure incidents under adversarial pressure. A Responder agent is trained via PPO to fix failing services while a Breaker agent continuously generates harder, more deceptive failures.
+An OpenEnv-compatible reinforcement learning environment where AI agents learn to resolve production infrastructure incidents under adversarial pressure. A Responder agent is trained via GRPO to fix failing services while a Breaker agent continuously generates harder, more deceptive failures.
 
 ## Overview
 
-Production incidents are expensive and time-sensitive. Ilyushin trains LLMs to autonomously diagnose and resolve infrastructure failures across five interconnected services. What makes this environment distinct is the adversarial dynamic: a second LLM (the Breaker) observes the Responder's performance and escalates its attack strategy accordingly — injecting cascades, red herrings, and simultaneous multi-service failures as the Responder improves.
+Production incidents are expensive and time-sensitive. Ilyushin trains LLMs to autonomously diagnose and resolve infrastructure failures across five interconnected services. What makes this environment distinct is the adversarial dynamic: a second LLM (the Breaker) observes the Responder's performance and escalates its attack strategy accordingly, injecting cascades, red herrings, and simultaneous multi-service failures as the Responder improves.
 
 This creates a genuine multi-agent training loop where both sides are forced to adapt.
 
 ## Project Structure
 
 ```
-agents/          # Breaker, Monitor, Responder, Trainer, Verifier agents
+agents/          # Breaker, Monitor, Responder agents
 api/             # FastAPI routes (env, tasks, grader, baseline)
 env/             # Core environment (state, models, reward)
 tasks/           # Task definitions (easy, medium, hard) and registry
-training/        # PPO training script, dataset, curriculum, reward function
+training/        # GRPO training script, dataset, curriculum, reward function
 world/           # Infrastructure simulation and incident generator
 inference.py     # Runs trained agent through evaluation episodes
 main.py          # Starts the API server
@@ -119,13 +119,9 @@ export MODEL_NAME="meta-llama/Llama-3.2-3B-Instruct"
 
 **Monitor** — analyzes infrastructure state and provides diagnostic context to the Responder each step.
 
-**Verifier** — post-episode health check confirming resolution status.
-
-**Trainer** — post-episode coaching agent that analyzes actions taken and generates improvement recommendations.
-
 ## Training
 
-Training uses PPO via HuggingFace TRL with QLoRA (4-bit NF4 quantization + LoRA adapters) on the Responder model. The Breaker adapts difficulty in real time based on Responder performance.
+Training uses GRPO on the Responder model. The Breaker adapts difficulty in real time based on Responder performance.
 
 ```bash
 cd training
@@ -137,26 +133,6 @@ python train.py
 
 The training script runs three curriculum phases (easy, medium, hard), saves checkpoints after each phase, and generates reward and performance plots on completion.
 
-### Training Plots
-
-![Reward Curve](training/plots/01_reward_curve.png)
-*Episode reward across all three curriculum phases. Smoothed trend shows policy improvement over training.*
-
-![Success Rate](training/plots/02_success_rate.png)
-*Percentage of services resolved per episode. Trained agent vs random baseline.*
-
-![Baseline vs Trained](training/plots/03_baseline_vs_trained.png)
-*Success rate comparison between random baseline agent and PPO-trained Responder across all difficulty levels.*
-
-![Breaker Escalation](training/plots/04_breaker_escalation.png)
-*Breaker difficulty level over training. As the Responder improves, the Breaker escalates its attack complexity.*
-
-![Action Distribution](training/plots/05_action_distribution.png)
-*Actions taken by the trained agent per phase. Shift from passive (read_logs) to corrective actions (restart_service, scale_up) indicates learning.*
-
-![Steps to Resolution](training/plots/06_steps_to_resolution.png)
-*Average steps to resolve incidents. Trained agent resolves incidents faster than the random baseline.*
-
 ## Inference
 
 ```bash
@@ -165,7 +141,7 @@ export MODEL_NAME="meta-llama/Llama-3.2-3B-Instruct"
 python inference.py
 ```
 
-Runs the trained agent through one episode each of easy, medium, and hard difficulty, with Monitor analysis, Verifier confirmation, and Trainer coaching at the end of each episode.
+Runs the trained agent through one episode each of easy, medium, and hard difficulty, with Monitor analysis at each step.
 
 ## Links
 
