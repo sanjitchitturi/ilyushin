@@ -145,7 +145,5 @@ Runs the trained agent through one episode each of easy, medium, and hard diffic
 
 ## Links
 
-- HuggingFace Space: [link]
-- Training notebook: [link]
-- Demo video: [link]
+- HuggingFace Space: https://huggingface.co/spaces/akkiisfrommars/ilyushin
 - GitHub: https://github.com/vedkde/Ilyushin
