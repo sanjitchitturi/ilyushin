@@ -8,20 +8,6 @@ Production incidents are expensive and time-sensitive. Ilyushin trains LLMs to a
 
 This creates a genuine multi-agent training loop where both sides are forced to adapt.
 
-## Project Structure
-
-```
-agents/          # Breaker, Monitor, Responder agents
-api/             # FastAPI routes (env, tasks, grader, baseline)
-env/             # Core environment (state, models, reward)
-tasks/           # Task definitions (easy, medium, hard) and registry
-training/        # GRPO training script, dataset, curriculum, reward function
-world/           # Infrastructure simulation and incident generator
-inference.py     # Runs trained agent through evaluation episodes
-main.py          # Starts the API server
-Dockerfile       # Container setup
-```
-
 ## Setup
 
 ```bash
